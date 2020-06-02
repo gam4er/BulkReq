@@ -2,9 +2,13 @@
 using Microsoft.Management.Infrastructure.Generic;
 using Microsoft.Management.Infrastructure.Options;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace BulkReq
 {
@@ -15,7 +19,73 @@ namespace BulkReq
             RunWMI(opts);
         }
 
-        public static int CurrentlyRunThreads = 0;
+        public static async Task OneTaskQueryProcessAsync(CimSession session)
+        {
+            var instanceObject = new CimInstanceWatcher();
+            var AR = AsyncListRunningProcesses(session).Subscribe(instanceObject);
+            instanceObject.OnCompleted();
+        }
+
+        public static void GetRunningProcessesAsync(CimSession session, int Threads)
+        {
+            // ***Create a query that, when executed, returns a collection of tasks.
+            IEnumerable<Task> TasksQuery = from i in Enumerable.Range(0, Threads) select OneTaskQueryProcessAsync(session);
+
+            // ***Use ToList to execute the query and start the tasks.
+            List<Task> WMITasks = TasksQuery.ToList();
+
+            // ***Add a loop to process the tasks one at a time until none remain.
+            while (WMITasks.Count > 0)
+            {
+                // Identify the first task that completes.
+                Task firstFinishedTask = Task.WhenAny(WMITasks);
+                // ***Remove the selected task from the list so that you don't
+                // process it more than once.
+                WMITasks.Remove(firstFinishedTask);
+                // and add another one
+                firstFinishedTask = OneTaskQueryProcessAsync(session);
+                WMITasks.Add(firstFinishedTask);
+            }
+        }
+
+
+        public static Task OneTaskQueryProcessSync(CimSession session)
+        {
+            //ListRunningProcesses(session);
+            Task t = new Task (() => { ListRunningProcesses(session); });
+            t.Start();
+            return t;
+        }
+
+        public static void GetRunningProcessesSync(CimSession session, int Threads)
+        {
+            //DelegateListRunningProcesses @delegate = ListRunningProcesses;
+
+            // ***Create a query that, when executed, returns a collection of tasks.
+            IEnumerable<Task> TasksQuery = from i in Enumerable.Range(0, Threads) select OneTaskQueryProcessSync(session);                                           
+
+            // ***Use ToList to execute the query and start the tasks.
+            List<Task> WMITasks = TasksQuery.ToList();
+            //WMITasks.ForEach(t => t.Start());
+
+
+            // ***Add a loop to process the tasks one at a time until none remain.
+
+            for (; ; )
+            {
+                for (int i = 0; i < WMITasks.Count; i++)
+                {
+                    if (WMITasks[i].IsCanceled || WMITasks[i].IsCompleted || WMITasks[i].IsFaulted)
+                    {
+                        WMITasks.RemoveAt(i);
+                        WMITasks.Add( OneTaskQueryProcessSync(session));
+                        //WMITasks[i].Start();
+                    }
+                }
+                Thread.Sleep(200);
+            }
+        }
+
 
         public static int RunWMI(WMIOptions opts) 
         {
@@ -24,33 +94,32 @@ namespace BulkReq
 
             if (opts.AsyncOnly)
             {
-                for (int j = 0 ; ; j++)                
+                Task t = Task.Run(() => GetRunningProcessesAsync(session, opts.Threads));
+                if (opts.Minutes > 0)
                 {
-                    if (CurrentlyRunThreads >= opts.At)                    
-                        Thread.Sleep(500);                    
-                    else
-                    {
-                        var instanceObject = new CimInstanceWatcher();
-                        AsyncListRunningProcesses(session).Subscribe(instanceObject);                        
-                        CurrentlyRunThreads++;
-                        instanceObject.OnCompleted();
-                    }
-                    if (j % 100 == 0)
-                    {
-                        Console.Write("\r{0}", CurrentlyRunThreads);
-                    }
+                    TimeSpan ts = TimeSpan.FromMilliseconds(opts.Minutes * 1000 * 60);
+                    if (!t.Wait(ts))
+                        Console.WriteLine("The timeout interval elapsed.");
+                }
+                else
+                {
+                    t.Wait();
                 }
             }
             else
             {
-                for (int i = 0; i < 1000; i++)
+                Task t = Task.Run(() => GetRunningProcessesSync(session, opts.Threads));
+                if (opts.Minutes > 0)
                 {
-                    ListFiles(session, @"c:\windows\system32");
-                    ListRunningProcesses(session);
-                    ListRunningServices(session);
+                    TimeSpan ts = TimeSpan.FromMilliseconds(opts.Minutes * 1000 * 60);
+                    if (!t.Wait(ts))
+                        Console.WriteLine("The timeout interval elapsed.");
+                }
+                else
+                {
+                    t.Wait();
                 }
             }
-
             return 0;
         }
 
@@ -73,14 +142,12 @@ namespace BulkReq
             }
         }
 
-        
-
         class CimInstanceWatcher : IObserver<CimInstance>
         {
+
             public void OnCompleted()
             {
-                //Console.WriteLine("Done");
-                CurrentlyRunThreads--;
+                //throw new NotImplementedException();
             }
 
             public void OnError(Exception e)
@@ -94,24 +161,20 @@ namespace BulkReq
                 //Console.WriteLine("Value: " + value);
                 try
                 {
-                    string s1 = (string)(value.CimInstanceProperties["ProcessID"].Value);
-                    string s2 = (string)(value.CimInstanceProperties["ParentProcessID"].Value);
-                    string s3 = (string)(value.CimInstanceProperties["Name"].Value);
-                    //Console.WriteLine("{0,-10} {1,-10} {3,-20} {2,5:1}",
-                    /*
-                    Console.WriteLine("{0,-10} {1,-10} {2,5:1}",
-                        value.CimInstanceProperties["ProcessID"].Value,
-                        value.CimInstanceProperties["ParentProcessID"].Value,
-                        value.CimInstanceProperties["Name"].Value);*/
+                    var s1 = value.CimInstanceProperties["ProcessID"].Value;
+                    var s2 = value.CimInstanceProperties["ParentProcessID"].Value;
+                    var s3 = value.CimInstanceProperties["Name"].Value;
+                    Console.WriteLine("{0,-10} {1,-10} {2,5:1}", s1, s2, s3);
                     //session.InvokeMethod(item, "GetOwner", null).OutParameters["User"].Value);
                 }
-                catch (Exception ex) { }
+                catch (Exception ex) {
+                }
             }
            
         }
         static CimAsyncMultipleResults<CimInstance> AsyncListRunningProcesses(CimSession session)
         {
-            //Console.WriteLine("{0,-10} {1,-10} {2,4:1}", "PID", "PPID", "Name");
+            Console.WriteLine("{0,-10} {1,-10} {2,4:1}", "PID", "PPID", "Name");
             return session.QueryInstancesAsync(@"root\cimv2", "WQL", "SELECT * FROM Win32_Process");
         }
 

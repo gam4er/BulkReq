@@ -50,7 +50,13 @@ namespace BulkReq
             Required = false,
             Default = 1,
             HelpText = "Number of active WMI threads")]
-        public int At { get; set; }
+        public int Threads { get; set; }
+
+        [Option('m', "minutes",
+            Required = false,
+            Default = 0,
+            HelpText = "How many minutes souls take a test, default = 0. It means unlimited")]
+        public int Minutes { get; set; }
 
         /*
         [Value(0, MetaName = "offset", HelpText = "File offset.")]
