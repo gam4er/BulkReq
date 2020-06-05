@@ -30,7 +30,7 @@ namespace BulkReq
         // Omitting long name, defaults to name of property, ie "--verbose"
         [Option('d', "dcom",
             Required = false,
-            Default = true,
+            Default = false,
             HelpText = "Suggest to use DCOM methods to query WMI. Enabled by default")]
         public bool DCOM { get; set; }
 
@@ -48,7 +48,7 @@ namespace BulkReq
 
         [Option('t', "threads",
             Required = false,
-            Default = 1,
+            Default = 10,
             HelpText = "Number of active WMI threads")]
         public int Threads { get; set; }
 
