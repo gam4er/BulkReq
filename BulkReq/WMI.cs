@@ -23,28 +23,52 @@ namespace BulkReq
         {
             var instanceObject = new CimInstanceWatcher();
             var AR = AsyncListRunningProcesses(session).Subscribe(instanceObject);
-            instanceObject.OnCompleted();
+            //instanceObject.OnCompleted();
+            instanceObject.WaitForCompletion();
+            instanceObject.Dispose();
+            AR.Dispose();
+            
+            //instanceObject = null;
+        }
+
+        public static List<Task> RemoveFinishedTaskAndAddNew(CimSession session, List<Task> WMITasks)
+        {
+            WMITasks.Any(n => {
+                if (n.IsCanceled || n.IsCompleted || n.IsFaulted)
+                {
+                    n.Dispose();
+                    WMITasks[WMITasks.IndexOf(n)] = OneTaskQueryProcessAsync(session);
+                    return true;
+                }
+                else
+                    return false;
+            }
+            );
+            return WMITasks;
         }
 
         public static void GetRunningProcessesAsync(CimSession session, int Threads)
         {
             // ***Create a query that, when executed, returns a collection of tasks.
-            IEnumerable<Task> TasksQuery = from i in Enumerable.Range(0, Threads) select OneTaskQueryProcessAsync(session);
-
+            //IEnumerable<Task> TasksQuery = from i in Enumerable.Range(0, Threads) select OneTaskQueryProcessAsync(session);
+            
             // ***Use ToList to execute the query and start the tasks.
-            List<Task> WMITasks = TasksQuery.ToList();
+            List<Task> WMITasks = (from i in Enumerable.Range(0, Threads) select OneTaskQueryProcessAsync(session)).ToList();
 
             // ***Add a loop to process the tasks one at a time until none remain.
             while (WMITasks.Count > 0)
             {
                 // Identify the first task that completes.
-                Task firstFinishedTask = Task.WhenAny(WMITasks);
+                /*Task firstFinishedTask =*/
+                Task.WhenAny(WMITasks).Wait();
+                WMITasks = RemoveFinishedTaskAndAddNew(session, WMITasks);
                 // ***Remove the selected task from the list so that you don't
                 // process it more than once.
-                WMITasks.Remove(firstFinishedTask);
+                //WMITasks.Remove(firstFinishedTask);
+
                 // and add another one
-                firstFinishedTask = OneTaskQueryProcessAsync(session);
-                WMITasks.Add(firstFinishedTask);
+                //firstFinishedTask = OneTaskQueryProcessAsync(session);
+                //WMITasks.Add(firstFinishedTask);
             }
         }
 
@@ -77,6 +101,7 @@ namespace BulkReq
                 {
                     if (WMITasks[i].IsCanceled || WMITasks[i].IsCompleted || WMITasks[i].IsFaulted)
                     {
+                        WMITasks[i].Dispose();
                         WMITasks.RemoveAt(i);
                         WMITasks.Add( OneTaskQueryProcessSync(session));
                         //WMITasks[i].Start();
@@ -86,6 +111,14 @@ namespace BulkReq
             }
         }
 
+        public static void PrintCimException(CimException exception)
+        {
+            Console.WriteLine("Error Code = " + exception.NativeErrorCode);
+            Console.WriteLine("MessageId = " + exception.MessageId);
+            Console.WriteLine("ErrorSource = " + exception.ErrorSource);
+            Console.WriteLine("ErrorType = " + exception.ErrorType);
+            Console.WriteLine("Status Code = " + exception.StatusCode);
+        }
 
         public static int RunWMI(WMIOptions opts) 
         {
@@ -144,16 +177,34 @@ namespace BulkReq
 
         class CimInstanceWatcher : IObserver<CimInstance>
         {
+            private readonly ManualResetEventSlim doneEvent = new ManualResetEventSlim(false);
 
             public void OnCompleted()
             {
                 //throw new NotImplementedException();
+                //var t = this.GetType();
+                this.doneEvent.Set();
+
             }
 
-            public void OnError(Exception e)
+            public void WaitForCompletion()
             {
-                Console.WriteLine("Error: " + e.Message);
-                //return -1;
+                this.doneEvent.Wait();
+            }
+
+            public void OnError(Exception error)
+            {
+                CimException cimException = error as CimException;
+                if (cimException != null)
+                {
+                    PrintCimException(cimException);
+                }
+                else
+                {
+                    throw error;
+                }
+
+                this.doneEvent.Set();
             }
 
             public void OnNext(CimInstance value)
@@ -170,7 +221,30 @@ namespace BulkReq
                 catch (Exception ex) {
                 }
             }
-           
+
+            public void Dispose()
+            {
+                this.Dispose(true);
+                GC.SuppressFinalize(this);
+            }
+
+            private void Dispose(bool disposing)
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                if (disposing)
+                {
+                    doneEvent.Dispose();
+                }
+
+                disposed = true;
+            }
+
+            private bool disposed = true;
+
         }
         static CimAsyncMultipleResults<CimInstance> AsyncListRunningProcesses(CimSession session)
         {
