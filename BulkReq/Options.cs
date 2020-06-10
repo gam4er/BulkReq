@@ -31,8 +31,15 @@ namespace BulkReq
         [Option('d', "dcom",
             Required = false,
             Default = false,
-            HelpText = "Suggest to use DCOM methods to query WMI. Enabled by default")]
+            HelpText = "Suggest to use DCOM methods to query WMI.")]
         public bool DCOM { get; set; }
+
+        [Option('c', "console",
+            Required = false,
+            Default = false,
+            HelpText = "Should hide console output?")]
+        public bool HideToConsole { get; set; }
+
 
         [Option('a', "async",
             Required = false,

@@ -14,6 +14,8 @@ namespace BulkReq
 {
     class WMI
     {
+        public static bool HideToConsole = false;
+
         public WMI(WMIOptions opts)
         {
             RunWMI(opts);
@@ -72,7 +74,6 @@ namespace BulkReq
             }
         }
 
-
         public static Task OneTaskQueryProcessSync(CimSession session)
         {
             //ListRunningProcesses(session);
@@ -124,6 +125,8 @@ namespace BulkReq
         {
             CimSession session = CreateSession(opts.Host, opts.DCOM);
             ListBasicInfo(session);
+            if (opts.HideToConsole)
+                HideToConsole = true;
 
             if (opts.AsyncOnly)
             {
@@ -181,8 +184,6 @@ namespace BulkReq
 
             public void OnCompleted()
             {
-                //throw new NotImplementedException();
-                //var t = this.GetType();
                 this.doneEvent.Set();
 
             }
@@ -209,16 +210,17 @@ namespace BulkReq
 
             public void OnNext(CimInstance value)
             {
-                //Console.WriteLine("Value: " + value);
                 try
                 {
                     var s1 = value.CimInstanceProperties["ProcessID"].Value;
                     var s2 = value.CimInstanceProperties["ParentProcessID"].Value;
                     var s3 = value.CimInstanceProperties["Name"].Value;
-                    Console.WriteLine("{0,-10} {1,-10} {2,5:1}", s1, s2, s3);
+                    if (!HideToConsole)
+                        Console.WriteLine("{0,-10} {1,-10} {2,5:1}", s1, s2, s3);
                     //session.InvokeMethod(item, "GetOwner", null).OutParameters["User"].Value);
                 }
                 catch (Exception ex) {
+                    Console.WriteLine("{0}", ex, ConsoleColor.DarkRed);
                 }
             }
 
@@ -246,46 +248,66 @@ namespace BulkReq
             private bool disposed = true;
 
         }
+
         static CimAsyncMultipleResults<CimInstance> AsyncListRunningProcesses(CimSession session)
         {
-            Console.WriteLine("{0,-10} {1,-10} {2,4:1}", "PID", "PPID", "Name");
+            if (!HideToConsole)
+                Console.WriteLine("{0,-10} {1,-10} {2,4:1}", "PID", "PPID", "Name");
             return session.QueryInstancesAsync(@"root\cimv2", "WQL", "SELECT * FROM Win32_Process");
         }
 
         #region WMIActivities
         static void ListBasicInfo(CimSession session)
         {
+            
             var query = session.QueryInstances(@"root\cimv2", "WQL", "SELECT * FROM Win32_ComputerSystem");
-            foreach (CimInstance item in query)
+            try
             {
-                Console.Write("Hostname: {0} Domain: {1} ",
-                item.CimInstanceProperties["Name"].Value,
-                item.CimInstanceProperties["Domain"].Value);
+                foreach (CimInstance item in query)
+                {
+                    Console.Write("Hostname: {0} Domain: {1} ",
+                    item.CimInstanceProperties["Name"].Value,
+                    item.CimInstanceProperties["Domain"].Value);
+                }
+            }
+            catch (Exception ex) {
+                Console.WriteLine(ex);
             }
 
             query = session.QueryInstances(@"root\cimv2", "WQL", "SELECT * FROM Win32_OperatingSystem");
-            foreach (CimInstance item in query)
+            try
             {
-                Console.WriteLine("Version: {0}", item.CimInstanceProperties["Version"].Value);
+                foreach (CimInstance item in query)
+                {
+                    Console.WriteLine("Version: {0}", item.CimInstanceProperties["Version"].Value);
+                }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+            }
+
         }
         static void ListRunningProcesses(CimSession session)
         {
             var query = session.QueryInstances(@"root\cimv2", "WQL", "SELECT * FROM Win32_Process");
-
-            Console.WriteLine("{0,-10} {1,-10} {3,-20} {2,4:1}", "PID", "PPID", "Name", "Owner");
+            if (!HideToConsole)
+                Console.WriteLine("{0,-10} {1,-10} {3,-20} {2,4:1}", "PID", "PPID", "Name", "Owner");
             foreach (CimInstance item in query)
             {
-
                 try
                 {
-                    Console.WriteLine("{0,-10} {1,-10} {3,-20} {2,5:1}",
-                        item.CimInstanceProperties["ProcessID"].Value,
-                        item.CimInstanceProperties["ParentProcessID"].Value,
-                        item.CimInstanceProperties["Name"].Value,
-                        session.InvokeMethod(item, "GetOwner", null).OutParameters["User"].Value);
+                    var v1 = item.CimInstanceProperties["ProcessID"].Value;
+                    var v2 = item.CimInstanceProperties["ParentProcessID"].Value;
+                    var v3 = item.CimInstanceProperties["Name"].Value;
+                    var v4 = session.InvokeMethod(item, "GetOwner", null).OutParameters["User"].Value;
+                    if (!HideToConsole)
+                        Console.WriteLine("{0,-10} {1,-10} {3,-20} {2,5:1}", v1, v2, v3, v4);
+
                 }
-                catch (Exception ex) { }
+                catch (Exception ex) {
+                    Console.WriteLine("{0}", ex, ConsoleColor.DarkRed);
+                }
             }
         }
         static void ListRunningServices(CimSession session)
